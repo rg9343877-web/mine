@@ -33,6 +33,9 @@ CUSTOM_REPLACEMENT_MAP = {
 }
 # =========================================================================
 
+# Pattern to remove "returaj" variants (case-insensitive): "returaj", "returaj gaikwad", "returaj_gaikwad", "@returaj", "returajgaikwad"
+UNWANTED_RETURAJ_PATTERN = re.compile(r'@?returaj(?:[_\s]*gaikwad)?|returajgaikwad', re.IGNORECASE)
+
 ADMIN_USER_IDS = [5983880450]
 CURRENT_BATCH_CANCEL = False
 LOCAL_TEMP_PATH = "temp_media"
@@ -58,7 +61,8 @@ def run_db(query, params=()):
             cursor.execute(query, params)
             if "SELECT" in query: return cursor.fetchone()
             else: conn.commit()
-    except Exception: pass
+    except Exception:
+        pass
     return None
 
 def format_size(bytes_size):
@@ -70,8 +74,12 @@ def direct_watermark_cleaner(old_text):
     watermark = get_watermark()
     if not old_text:
         return f"{watermark}" if watermark else ""
-    clean = re.sub(r'(?i)@LioBankingPro', '', old_text)
+    clean = old_text
+    # existing removals
+    clean = re.sub(r'(?i)@LioBankingPro', '', clean)
     clean = re.sub(r'(?i)Extracted by\s*:\s*', '', clean)
+    # also remove returaj variants
+    clean = UNWANTED_RETURAJ_PATTERN.sub('', clean)
     clean = re.sub(r'\n\s*\n+', '\n\n', clean).strip()
     return f"{clean}\n\n{watermark}" if watermark else clean
 
@@ -88,6 +96,9 @@ def global_text_cleaner(text_input):
     # Free_Batches removal
     clean = re.sub(r'(?i)\bfree[_\s]*batches\b', '', clean)
 
+    # Remove returaj / returaj gaikwad variants (keep this in addition to other removals)
+    clean = UNWANTED_RETURAJ_PATTERN.sub('', clean)
+
     # Existing unwanted chars removal
     clean = re.sub(r"[^a-zA-Z0-9\s]", "", clean)
     clean = re.sub(r"\s+", " ", clean)
@@ -103,12 +114,17 @@ def build_forward_watermark_caption(old_caption):
             for target_word, replacement in CUSTOM_REPLACEMENT_MAP.items():
                 pattern = re.compile(re.escape(target_word), re.IGNORECASE)
                 line = pattern.sub(replacement, line)
+            # preserve and keep existing removal rules
             line = re.sub(r'(?i)\bluciferbanker\s*x\s*bhaiyaji\b|\bluciferbanker\b|\bbhaiyaji\b|\bparinda\b|\bfree_batches\b', '', line).strip()
             line = re.sub(r'(?i)\bjetha\s*banker\b|\bjetha_banker\b|\bjethabanker\b|@jethabanker|\blioBankingPro\b|\blio\b|\bjethalal\b|\bjetha\b|\bfree_batches\b', '', line).strip()
             line = re.sub(r'(?i)\bluciferbanker\s*x\s*bhaiyaji\b|\bluciferbanker\b|\bbhaiyaji\b|\bparinda\b', '', line).strip()
-            line = re.sub(r'(?i)\bjetha\s*banker\b|\bjetha_banker\b|\bjethabanker\b|@jethabanker|\blioBankingPro\b|\blio\b|\bjethalal\b|\bjetha\b', '', line).strip()
+            line = re.sub(r'(?i)\bjetha\s*banker\b|\bjetha_banker\b|\bjethabanker\b|@jethabanker|\blioBankingPro\b|\blio\b|\bjethalal\b|\bjetha', '', line).strip()
+            # remove @usernames
             line = re.sub(r'@[a-zA-Z0-9_]+', '', line).strip()
+            # remove common suffix markers
             line = re.sub(r'\s*\(1\)', '', line)
+            # also remove returaj variants explicitly (in addition to other rules)
+            line = UNWANTED_RETURAJ_PATTERN.sub('', line).strip()
             clean_lines.append(line)
     final_text = "\n".join([l for l in clean_lines if l.strip()]).strip()
     return f"{final_text}\n\n{watermark}" if watermark else final_text
@@ -119,7 +135,8 @@ def clean_and_build_caption(old_caption, fallback_name=""):
     if old_caption:
         teacher_found = ""
         teacher_match = re.search(r'(?i)([a-zA-Z]+\s*(?:Sir|Mam|Maam|Madam))', old_caption)
-        if teacher_match: teacher_found = teacher_match.group(1).strip()
+        if teacher_match:
+            teacher_found = teacher_match.group(1).strip()
         lines = [line.strip() for line in old_caption.split('\n') if line.strip()]
         for line in lines:
             ttl_m = re.search(r'(?i)(Title|Subject|Lesson|Topic|Content|Lecture)\s*:\s*(.*)', line)
@@ -156,7 +173,8 @@ async def get_video_metadata_async(video_path):
                     width, height = int(stream.get('width', 0)), int(stream.get('height', 0))
                     break
             return width, height, duration
-        except Exception: continue
+        except Exception:
+            continue
     return 1280, 720, 3600
 
 async def generate_instant_thumb_async(video_path):
@@ -168,18 +186,24 @@ async def generate_instant_thumb_async(video_path):
                 stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
             )
             await asyncio.wait_for(proc.communicate(), timeout=12)
-            if os.path.exists(thumb_path) and os.path.getsize(thumb_path) > 100: return thumb_path
-        except Exception: continue
+            if os.path.exists(thumb_path) and os.path.getsize(thumb_path) > 100:
+                return thumb_path
+        except Exception:
+            continue
     return None
 
 async def safe_edit_text(msg, text):
-    try: await msg.edit_text(text)
-    except MessageNotModified: pass
-    except Exception: pass
+    try:
+        await msg.edit_text(text)
+    except MessageNotModified:
+        pass
+    except Exception:
+        pass
 
 last_edit = {}
 async def progress_bar(current, total, action, msg, start, compression_active=False):
-    if CURRENT_BATCH_CANCEL: raise Exception("Stopped!")
+    if CURRENT_BATCH_CANCEL:
+        raise Exception("Stopped!")
     now = time.time()
     if now - last_edit.get(msg.id, 0) > 1.5 or current == total:
         last_edit[msg.id] = now
@@ -198,18 +222,19 @@ async def progress_bar(current, total, action, msg, start, compression_active=Fa
                 f"🚀 **Burst Speed:** `{spd/1048576:.2f} MB/s`"
             )
             await safe_edit_text(msg, dashboard)
-        except Exception: pass
+        except Exception:
+            pass
 
 def parse_link_advanced(text_arg):
     clean_text = "".join(text_arg.split()).split("?")[0]
     all_numbers = re.findall(r'\d+', clean_text)
-    
+
     # Yeh line public (username) aur private dono links ko bina error ke pass hone degi
     if not all_numbers or (len(all_numbers) < 2 and "t.me/c/" in clean_text):
         raise ValueError("Could not extract standard numerical configurations from the URL string.")
-        
+
     msg_id = int(all_numbers[-1])
-    
+
     # Agar private link hai (/c/ wala)
     if "t.me/c/" in clean_text:
         chat_candidate = all_numbers[0]
@@ -221,15 +246,18 @@ def parse_link_advanced(text_arg):
         parts = [p for p in clean_text.split('/') if p.strip()]
         chat_str = parts[-2]
         chat_id = int(f"-100{chat_str}") if chat_str.isdigit() else chat_str
-        
+
     return chat_id, msg_id
 
 async def safe_api(func, *args, **kwargs):
     for i in range(3):
-        try: return await func(*args, **kwargs)
-        except FloodWait as e: await asyncio.sleep(e.value + 2)
+        try:
+            return await func(*args, **kwargs)
+        except FloodWait as e:
+            await asyncio.sleep(e.value + 2)
         except Exception:
-            if i == 2: raise
+            if i == 2:
+                raise
             await asyncio.sleep(2)
 
 # 🔥 FORCE PEER RESOLVER LOGIC
@@ -241,22 +269,27 @@ async def force_sync_peer_async(client_app, raw_chat_id):
     except Exception:
         try:
             await client_app.get_chat(raw_chat_id)
-        except Exception: pass
+        except Exception:
+            pass
 
 async def fetch_message_dual_nodes(raw_chat_id, msg_id):
     # Try with Client Node 1
     try:
         await force_sync_peer_async(user_app_1, raw_chat_id)
         messages = await user_app_1.get_messages(raw_chat_id, msg_id)
-        if messages and (messages.media or messages.text): return messages, user_app_1
-    except Exception: pass
+        if messages and (messages.media or messages.text):
+            return messages, user_app_1
+    except Exception:
+        pass
 
     # Try with Client Node 2
     try:
         await force_sync_peer_async(user_app_2, raw_chat_id)
         messages = await user_app_2.get_messages(raw_chat_id, msg_id)
-        if messages and (messages.media or messages.text): return messages, user_app_2
-    except Exception: pass
+        if messages and (messages.media or messages.text):
+            return messages, user_app_2
+    except Exception:
+        pass
 
     return None, None
 
@@ -266,7 +299,8 @@ async def process_nitro_restricted(cid, msg_id_list, status_msg, topic_id, prefi
     worker_client = None
     for mid in msg_id_list:
         msg, worker_client = await fetch_message_dual_nodes(cid, mid)
-        if msg: break
+        if msg:
+            break
 
     if not msg or not worker_client:
         BATCH_METRICS["skipped"] += 1
@@ -302,7 +336,8 @@ async def process_nitro_restricted(cid, msg_id_list, status_msg, topic_id, prefi
             v_width, v_height, v_duration = await get_video_metadata_async(path)
             generated_thumb = await generate_instant_thumb_async(path)
             await safe_api(bot_app.send_video, TARGET_CHAT_ID, video=path, thumb=generated_thumb, width=v_width, height=v_height, duration=v_duration, caption=caption, supports_streaming=True, progress=p_bar_up, **send_kwargs)
-            if generated_thumb and os.path.exists(generated_thumb): os.remove(generated_thumb)
+            if generated_thumb and os.path.exists(generated_thumb):
+                os.remove(generated_thumb)
             BATCH_METRICS["videos"] += 1
         else:
             clean_file_name = global_text_cleaner(raw_filename.rsplit('.', 1)[0]) + ext
@@ -315,7 +350,8 @@ async def process_nitro_restricted(cid, msg_id_list, status_msg, topic_id, prefi
         BATCH_METRICS["skipped"] += 1
         await safe_edit_text(status_msg, f"{prefix}❌ Fault Node: `{str(e)}`")
     finally:
-        if path and os.path.exists(path): os.remove(path)
+        if path and os.path.exists(path):
+            os.remove(path)
 
 def is_admin(_, __, message):
     return message.from_user and message.from_user.id in ADMIN_USER_IDS
@@ -357,7 +393,8 @@ async def stop_cmd(c, m):
 async def forward_watermark_cmd(c, m):
     global CURRENT_BATCH_CANCEL, BATCH_METRICS
     CURRENT_BATCH_CANCEL = False
-    if len(m.command) < 2: return await m.reply("❌ Usage: `/q [Topic_ID] link`")
+    if len(m.command) < 2:
+        return await m.reply("❌ Usage: `/q [Topic_ID] link`")
     try:
         BATCH_METRICS = {"total": 1, "videos": 0, "pdfs": 0, "skipped": 0, "bytes": 0}
         words = m.text.split()
@@ -369,7 +406,8 @@ async def forward_watermark_cmd(c, m):
         chat_id, msg_id = parse_link_advanced(link_to_parse)
         status = await m.reply("⚡ Bypassing asset...")
         await process_nitro_restricted(chat_id, [msg_id], status, topic_id, force_forward_mode=False, single_mode=True)
-    except Exception as e: await m.reply(f"❌ Single Bypass Fault: `{e}`")
+    except Exception as e:
+        await m.reply(f"❌ Single Bypass Fault: `{e}`")
 
 # Start batch -> spawn background worker
 @bot_app.on_message(filters.command("batch") & filters.create(is_admin))
@@ -476,11 +514,14 @@ async def main():
     global DB_NAME
     DB_NAME = "quantix_recovery.db"
     run_db('''CREATE TABLE IF NOT EXISTS batch_history (chat_id TEXT, msg_id INTEGER, status TEXT, PRIMARY KEY (chat_id, msg_id))''')
-    if SESSION_1: await user_app_1.start()
-    if SESSION_2: await user_app_2.start()
+    if SESSION_1:
+        await user_app_1.start()
+    if SESSION_2:
+        await user_app_2.start()
     await bot_app.start()
-    print("👹 CORE ENGINE V50.6 UP & ROUTING!")
-    while True: await asyncio.sleep(3600)
+    print(" CORE ENGINE V50.6 UP & ROUTING!")
+    while True:
+        await asyncio.sleep(3600)
 
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()

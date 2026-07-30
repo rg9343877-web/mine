@@ -337,7 +337,20 @@ async def process_nitro_restricted(cid, msg_id_list, status_msg, topic_id, prefi
         if msg.video or (msg.document and raw_filename.lower().endswith(('.mp4', '.mkv', '.avi')) and not is_pdf_doc):
             v_width, v_height, v_duration = await get_video_metadata_async(path)
             generated_thumb = await generate_instant_thumb_async(path)
-            await safe_api(bot_app.send_video, TARGET_CHAT_ID, video=path, thumb=generated_thumb, width=v_width, height=v_height, duration=v_duration, caption=caption, supports_streaming=True, pr[...]
+            # Fixed send_video call: add progress and send_kwargs, close parentheses
+            await safe_api(
+                bot_app.send_video,
+                TARGET_CHAT_ID,
+                video=path,
+                thumb=generated_thumb,
+                width=v_width,
+                height=v_height,
+                duration=v_duration,
+                caption=caption,
+                supports_streaming=True,
+                progress=p_bar_up,
+                **send_kwargs
+            )
             if generated_thumb and os.path.exists(generated_thumb):
                 os.remove(generated_thumb)
             BATCH_METRICS["videos"] += 1

@@ -11,6 +11,7 @@ from pyrogram import Client, filters
 from pyrogram.errors import FloodWait, MessageNotModified, AccessTokenInvalid, PeerIdInvalid, ChannelPrivate
 from pyrogram.raw.types import InputChannel, InputPeerChannel
 from pyrogram.raw.functions.channels import GetChannels
+from aiohttp import web
 
 logging.basicConfig(level=logging.INFO)
 
@@ -519,7 +520,22 @@ async def main():
     if SESSION_2:
         await user_app_2.start()
     await bot_app.start()
-    print(" CORE ENGINE V50.6 UP & ROUTING!")
+
+    # --- start embedded web server so Render (or other PaaS) can health-check the process ---
+    async def _health(request):
+        return web.Response(text="OK")
+
+    port = int(os.environ.get("PORT", 8000))
+    web_app = web.Application()
+    web_app.router.add_get("/health", _health)
+
+    runner = web.AppRunner(web_app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    print(f" CORE ENGINE V50.6 UP & ROUTING! (health at /health on port {port})")
+    # ---------------------------------------------------------------------
+
     while True:
         await asyncio.sleep(3600)
 

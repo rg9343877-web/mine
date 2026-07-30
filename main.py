@@ -7,6 +7,7 @@ import sqlite3
 import json
 import logging
 import uuid
+import socket
 from pyrogram import Client, filters
 from pyrogram.errors import FloodWait, MessageNotModified, AccessTokenInvalid, PeerIdInvalid, ChannelPrivate
 from pyrogram.raw.types import InputChannel, InputPeerChannel
@@ -336,7 +337,7 @@ async def process_nitro_restricted(cid, msg_id_list, status_msg, topic_id, prefi
         if msg.video or (msg.document and raw_filename.lower().endswith(('.mp4', '.mkv', '.avi')) and not is_pdf_doc):
             v_width, v_height, v_duration = await get_video_metadata_async(path)
             generated_thumb = await generate_instant_thumb_async(path)
-            await safe_api(bot_app.send_video, TARGET_CHAT_ID, video=path, thumb=generated_thumb, width=v_width, height=v_height, duration=v_duration, caption=caption, supports_streaming=True, progress=p_bar_up, **send_kwargs)
+            await safe_api(bot_app.send_video, TARGET_CHAT_ID, video=path, thumb=generated_thumb, width=v_width, height=v_height, duration=v_duration, caption=caption, supports_streaming=True, pr[...]
             if generated_thumb and os.path.exists(generated_thumb):
                 os.remove(generated_thumb)
             BATCH_METRICS["videos"] += 1
@@ -525,15 +526,37 @@ async def main():
     async def _health(request):
         return web.Response(text="OK")
 
-    port = int(os.environ.get("PORT", 8000))
+    # Use the PORT provided by the environment (Render sets this). Default to 10000 for local/dev fallback.
+    port = int(os.environ.get("PORT", "10000"))
+
     web_app = web.Application()
     web_app.router.add_get("/health", _health)
 
     runner = web.AppRunner(web_app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", port)
-    await site.start()
-    print(f" CORE ENGINE V50.6 UP & ROUTING! (health at /health on port {port})")
+
+    # Check whether the port is already in use. If it is, log and skip starting the embedded web server
+    # to avoid crashing with OSError: [Errno 98] address already in use.
+    port_in_use = False
+    try:
+        probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        probe.bind(("0.0.0.0", port))
+        probe.close()
+    except OSError:
+        port_in_use = True
+
+    if port_in_use:
+        logging.warning(f"Port {port} already in use; skipping embedded aiohttp health server. Assuming another process is serving the port.")
+    else:
+        try:
+            await site.start()
+            print(f" CORE ENGINE V50.6 UP & ROUTING! (health at /health on port {port})")
+        except OSError as e:
+            logging.exception(f"Failed to bind health server on 0.0.0.0:{port}: {e}")
+            # Do not re-raise — we prefer the process to continue running even if health endpoint can't be bound.
+
     # ---------------------------------------------------------------------
 
     while True:
